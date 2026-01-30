@@ -1,0 +1,275 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. MODEL USER
+model User {
+  id          Int      @id @default(autoincrement())
+  email       String   @unique
+  password    String
+  fullName    String   @map("full_name")
+  phone       String?
+  avatar      String?
+  bio         String?
+  role        Role     @default(GUEST)
+  isVerified  Boolean  @default(false) @map("is_verified")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Quan hệ
+  properties       Properties[]
+  bookings         Booking[]
+  reviews          Review[]
+  sentMessages     Message[]      @relation("Sender")
+  receivedMessages Message[]      @relation("Receiver")
+  wishlists        Wishlist[]
+  notifications    Notification[]
+  sentNotifications Notification[] @relation("NotificationSender") // Thông báo đã gửi
+  
+  // [SỬA LẠI ĐOẠN NÀY CHO KHỚP VỚI MODEL REPORT]
+  reportsSent      Report[]       @relation("Reporter")   // Các báo cáo mình gửi đi
+  reportsReceived  Report[]       @relation("TargetUser") // Các báo cáo người khác tố cáo mình
+
+  @@map("users")
+}
+
+enum Role {
+  GUEST
+  HOST
+  ADMIN
+}
+
+// 2. MODEL PROPERTY
+model Properties {
+  id            Int      @id @default(autoincrement())
+  ownerId       Int      @map("owner_id")
+  locationId    Int?     @map("location_id")
+  
+  title         String
+  description   String?  @db.Text
+  address       String
+  latitude      Float?
+  longitude     Float?
+  
+  maxGuests     Int      @default(1) @map("max_guests")
+  numBedrooms   Int      @default(1) @map("num_bedrooms")
+  numBeds       Int      @default(1) @map("num_beds")
+  numBathrooms  Int      @default(1) @map("num_bathrooms")
+
+  pricePerNight Decimal  @map("price_per_night") @db.Decimal(10, 2)
+  cleaningFee   Decimal  @default(0) @map("cleaning_fee") @db.Decimal(10, 2)
+
+  status        PropertyStatus @default(ACTIVE)
+  images        String[]
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  owner         User     @relation(fields: [ownerId], references: [id])
+  location      Location? @relation(fields: [locationId], references: [id])
+  bookings      Booking[]
+  amenities     PropertyAmenity[]
+  wishlists     Wishlist[]
+  calendar      PropertyCalendar[]
+  reports       Report[]
+
+  @@map("properties")
+}
+
+// 3. MODEL BOOKING
+model Booking {
+  id           Int      @id @default(autoincrement())
+  checkIn      DateTime @map("check_in")
+  checkOut     DateTime @map("check_out")
+  guestCount   Int      @default(1) @map("guest_count")
+
+  nightlyPrice Decimal  @map("nightly_price") @db.Decimal(12, 2)
+  serviceFee   Decimal  @default(0) @map("service_fee") @db.Decimal(12, 2)
+  cleaningFee  Decimal  @default(0) @map("cleaning_fee") @db.Decimal(12, 2)
+  totalPrice   Decimal  @map("total_price") @db.Decimal(12, 2)
+
+  status       BookingStatus @default(PENDING)
+  guestId      Int      @map("guest_id")
+  propertyId   Int      @map("property_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  guest        User       @relation(fields: [guestId], references: [id])
+  property     Properties @relation(fields: [propertyId], references: [id])
+  payment      Payment?
+  review       Review?
+  
+  // [THÊM DÒNG NÀY]
+  reports      Report[]   // Các khiếu nại liên quan đến đơn này
+
+  @@map("bookings")
+}
+
+// ... CÁC MODEL KHÁC (Location, PropertyCalendar, Payment, Review, Message, Notification, Amenity, Wishlist) GIỮ NGUYÊN ...
+
+model Location {
+  id          Int          @id @default(autoincrement())
+  name        String
+  image       String?
+  description String?
+  properties  Properties[]
+  @@map("locations")
+}
+
+model PropertyCalendar {
+  id          Int      @id @default(autoincrement())
+  propertyId  Int      @map("property_id")
+  date        DateTime @db.Date
+  isAvailable Boolean  @default(true) @map("is_available")
+  customPrice Decimal? @map("custom_price") @db.Decimal(10, 2)
+  property    Properties @relation(fields: [propertyId], references: [id])
+  @@unique([propertyId, date])
+  @@map("property_calendar")
+}
+
+enum PropertyStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  REFUNDED
+}
+
+model Payment {
+  id              Int           @id @default(autoincrement())
+  bookingId       Int           @unique @map("booking_id")
+  amount          Decimal       @db.Decimal(12, 2)
+  provider        String
+  transactionCode String?       @map("transaction_code")
+  status          PaymentStatus @default(PENDING)
+  paymentDate     DateTime      @default(now()) @map("payment_date")
+  booking         Booking       @relation(fields: [bookingId], references: [id])
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+model Review {
+  id          Int      @id @default(autoincrement())
+  bookingId   Int      @unique @map("booking_id")
+  userId      Int      @map("user_id")
+  rating      Int
+  accuracy    Int      @default(5)
+  checkIn     Int      @default(5) @map("check_in_rating")
+  cleanliness Int      @default(5)
+  value       Int      @default(5)
+  comment     String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+  booking     Booking  @relation(fields: [bookingId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+  @@map("reviews")
+}
+
+model Message {
+  id         Int      @id @default(autoincrement())
+  senderId   Int      @map("sender_id")
+  receiverId Int      @map("receiver_id")
+  content    String   @db.Text
+  isRead     Boolean  @default(false) @map("is_read")
+  sentAt     DateTime @default(now()) @map("sent_at")
+  sender     User     @relation("Sender", fields: [senderId], references: [id])
+  receiver   User     @relation("Receiver", fields: [receiverId], references: [id])
+  @@map("messages")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  senderId  Int?     @map("sender_id") // Người gửi (optional, cho Admin gửi thông báo)
+  title     String
+  message   String
+  type      String
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id])
+  sender    User?    @relation("NotificationSender", fields: [senderId], references: [id])
+  @@map("notifications")
+}
+
+model Amenity {
+  id         Int               @id @default(autoincrement())
+  name       String
+  iconUrl    String?           @map("icon_url")
+  type       String?
+  properties PropertyAmenity[]
+  @@map("amenities")
+}
+
+model PropertyAmenity {
+  propertyId Int        @map("property_id")
+  amenityId  Int        @map("amenity_id")
+  property   Properties @relation(fields: [propertyId], references: [id])
+  amenity    Amenity    @relation(fields: [amenityId], references: [id])
+  @@id([propertyId, amenityId])
+  @@map("property_amenities")
+}
+
+model Wishlist {
+  id         Int        @id @default(autoincrement())
+  userId     Int        @map("user_id")
+  propertyId Int        @map("property_id")
+  createdAt  DateTime   @default(now()) @map("created_at")
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property   Properties @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  @@unique([userId, propertyId])
+  @@map("wishlists")
+}
+
+// REPORT & ENUMS (ĐÃ CHUẨN)
+enum ReportReason {
+  SCAM
+  WRONG_INFO
+  OFFENSIVE
+  DAMAGED_PROPERTY
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  PROCESSING
+  RESOLVED
+  REJECTED
+}
+
+model Report {
+  id          Int          @id @default(autoincrement())
+  reason      ReportReason @default(OTHER)
+  description String       @db.Text
+  status      ReportStatus @default(PENDING)
+  images      String[]
+
+  reporterId  Int          @map("reporter_id")
+  reporter    User         @relation("Reporter", fields: [reporterId], references: [id])
+
+  targetPropertyId Int?        @map("target_property_id")
+  targetProperty   Properties? @relation(fields: [targetPropertyId], references: [id])
+
+  targetBookingId  Int?     @map("target_booking_id")
+  targetBooking    Booking? @relation(fields: [targetBookingId], references: [id])
+
+  targetUserId     Int?     @map("target_user_id")
+  targetUser       User?    @relation("TargetUser", fields: [targetUserId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("reports")
+}
